@@ -35,7 +35,7 @@ def get_oisst_flag(all_float_data, oisst_path = 's3://uw-escience-scratch-prod/o
     print('Openining : '+oisst_path)
     if oisst_path.split('.')[-1] == 'zarr':
         mhw_data = xr.open_zarr(oisst_path)
-    elif oisst_path.split('.')[-1] == '.nc':
+    elif oisst_path.split('.')[-1] == 'nc':
         mhw_data = xr.open_dataset(oisst_path)
     
     mhw_data.close()
@@ -70,6 +70,7 @@ def get_oisst_flag(all_float_data, oisst_path = 's3://uw-escience-scratch-prod/o
             
             # 2. Get all profile locations
             prof_inds = np.where(unique_dates == match_date)[0]
+            prof_inds = np.where(dates == match_date)[0]
 
             if prof_inds.shape[0]==0:
                     print(match_date)
@@ -101,18 +102,177 @@ def get_oisst_flag(all_float_data, oisst_path = 's3://uw-escience-scratch-prod/o
 
     return all_float_data
 
-def map_study_region(ax = None, ax_lims = [-127, -121, 34, 38], gridlabel=True, figsize=(8,4)):
-    """ 
-    Mapping shortcut for demo study region. Change default ax_lims as needed.
-    :param gridlabel: boolean, if True will label gridlines with lat/lon"""
-    if ax is None: 
-        fig = plt.figure(figsize=figsize, layout='tight')
-        ax = fig.add_subplot(1,1,1, projection=ccrs.PlateCarree())
+def map_study_region(ax=None, ax_lims=[-127, -121, 34, 38], gridlabel=True, figsize=(8,4), PROJ=None):
 
-    ax.set_extent(ax_lims)
-    ax.coastlines(resolution = "50m", zorder=5, linewidth = 1)
-    ax.add_feature(cfeature.LAND, zorder=5, linewidth = 1, edgecolor='k', facecolor='linen')
-    ax.set_aspect('equal')
-    ax.gridlines(draw_labels=gridlabel)
+    if PROJ is None:
+        PROJ = ccrs.PlateCarree()
+
+    if ax is None:
+        fig = plt.figure(figsize=figsize)
+        ax = fig.add_subplot(1, 1, 1, projection=PROJ)
+
+    ax.set_extent(
+        ax_lims,
+        crs=ccrs.PlateCarree()
+    )
+
+    ax.add_feature(
+        cfeature.LAND,
+        zorder=5,
+        linewidth=1,
+        edgecolor='k',
+        facecolor='linen'
+    )
+
+    ax.coastlines(
+        resolution="50m",
+        zorder=6,
+        linewidth=1
+    )
+
+    gl = ax.gridlines(
+        crs=ccrs.PlateCarree(),
+        draw_labels=False
+    )
 
     return ax
+
+def get_oisst_flag_spatialONLY(all_float_data, 
+                               oisst_path='s3://uw-escience-scratch-prod/oisst/mhw_mask_north_atlantic_final.zarr', 
+                               lon_name='lon',
+                               lat_name='lat',
+                               flag_name='mhw_mask'):
+
+    """
+    Match BGC-Argo float profiles to a spatial OISST mask
+    using nearest-neighbor matching with a KDTree.
+
+    Parameters
+    ----------
+    all_float_data : pandas.DataFrame
+        Must contain:
+        - PLATFORM_NUMBER
+        - CYCLE_NUMBER
+        - LONGITUDE
+        - LATITUDE
+
+    oisst_path : str
+        Path to spatial OISST mask.
+
+    lon_name : str
+        Longitude coordinate name in OISST dataset.
+
+    lat_name : str
+        Latitude coordinate name in OISST dataset.
+
+    flag_name : str
+        Name of spatial mask variable.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Original dataframe with spatial mask flag added.
+    """
+
+    # ---------------------------------------------------
+    # 1. Get one location for each float profile
+    # ---------------------------------------------------
+
+    float_data = (
+        all_float_data[
+            ['PLATFORM_NUMBER', 'CYCLE_NUMBER',
+             'LONGITUDE', 'LATITUDE']
+        ]
+        .groupby(['PLATFORM_NUMBER', 'CYCLE_NUMBER'])
+        .mean()
+    )
+
+    float_wmo_cycle = float_data.index.values
+
+    # ---------------------------------------------------
+    # 2. Load OISST spatial mask
+    # ---------------------------------------------------
+
+    print('Opening:', oisst_path)
+
+    if oisst_path.endswith('.zarr'):
+        mhw_data = xr.open_zarr(oisst_path)
+
+    elif oisst_path.endswith('.nc'):
+        mhw_data = xr.open_dataset(oisst_path)
+
+    else:
+        raise ValueError('OISST file must be .zarr or .nc')
+
+    # ---------------------------------------------------
+    # 3. Build KDTree from OISST grid
+    # ---------------------------------------------------
+
+    XX, YY = np.meshgrid(
+        mhw_data[lon_name].values,
+        mhw_data[lat_name].values
+    )
+
+    tree = KDTree(
+        np.c_[XX.ravel(), YY.ravel()]
+    )
+
+    # Default value for profiles outside / unavailable
+    all_mhw_flags = np.full(
+        all_float_data.shape[0],
+        -999.0
+    )
+
+    # ---------------------------------------------------
+    # 4. Match each float profile spatially
+    # ---------------------------------------------------
+
+    lons = float_data['LONGITUDE'].values % 360
+    lats = float_data['LATITUDE'].values
+
+    for ni in range(float_data.shape[0]):
+
+        if ni % 100 == 0:
+            print(ni, 'out of', float_data.shape[0])
+
+        # Find nearest OISST grid point
+        distance, ii = tree.query(
+            [lons[ni], lats[ni]]
+        )
+
+        ri, ci = np.unravel_index(
+            ii,
+            XX.shape
+        )
+
+        # Get WMO and cycle
+        wmo, cycle = float_wmo_cycle[ni]
+
+        # Find all rows belonging to this profile
+        all_inds = all_float_data.index[
+            (all_float_data['PLATFORM_NUMBER'] == wmo) &
+            (all_float_data['CYCLE_NUMBER'] == cycle)
+        ].values
+
+        # Get spatial mask value
+        output_value = mhw_data[flag_name].isel(
+            **{
+                lat_name: ri,
+                lon_name: ci
+            }
+        ).values
+
+        # Assign back to every measurement from this profile
+        all_mhw_flags[all_inds] = output_value
+
+    # ---------------------------------------------------
+    # 5. Add flag to original dataframe
+    # ---------------------------------------------------
+
+    all_float_data = all_float_data.assign(
+        **{flag_name: all_mhw_flags}
+    )
+
+    mhw_data.close()
+
+    return all_float_data
