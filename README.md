@@ -18,6 +18,7 @@ Provide a brief introduction describing the proposed work. Be sure to also decri
 | David Nicholson | ... | ... | Team Member |
 | Cassia Cai | ... | ... | Team Member |
 | Arjun Shetty | ... | ... | Team Member |
+| Abby Baskind | ... | ... | Team Member |
 
 ### The problem
 
