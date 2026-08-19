@@ -11,6 +11,31 @@ def round_to_year(dt):
     return datetime(new_year, 1, 1)
 def find_bloom_phenological_indices(bloom_slice, var_names):
     PRES, TEMP, PSAL, DOXY, CHLA, BBP700, LATITUDE, LONGITUDE, JULD = var_names
+    if len(bloom_slice.CHLA) == 0:
+        phenology_dict = {
+            # "REGION": region,
+            "YEAR": np.nan,
+            # "WMOS": bloom_slice["WMO_ID"].unique(),
+            "BLOOM_MAXIMUM": np.nan,
+            "BLOOM_PEAKS_VALUES": np.nan,
+            "BLOOM_PEAKS_JULD": np.nan,
+            "BLOOM_SLICE": np.nan,
+            "BLOOM_INITIATION_TS": np.nan,
+            "BLOOM_TERMINATION_TS": np.nan,
+            "BLOOM_DURATION_TS": np.nan,
+            "BLOOM_INITIATION_TS_DATE": np.nan,
+            "BLOOM_TERMINATION_TS_DATE": np.nan,
+            "BLOOM_INITIATION_CS": np.nan,
+            "BLOOM_TERMINATION_CS": np.nan,
+            "BLOOM_DURATION_CS": np.nan,
+            "BLOOM_INITIATION_CS_DATE": np.nan,
+            "BLOOM_TERMINATION_CS_DATE": np.nan,
+            "BLOOM_INITIATION_RC": np.nan,
+            "BLOOM_TERMINATION_RC": np.nan,
+            "BLOOM_DURATION_RC": np.nan,
+            "BLOOM_INITIATION_RC_DATE": np.nan,
+            "BLOOM_TERMINATION_RC_DATE": np.nan,
+        return pd.DataFrame([phenology_dict]).reset_index(drop=True)
     bloom_slice["RATE_OF_CHANGE"] = bloom_slice[CHLA].diff() / bloom_slice[JULD].diff().dt.days
     bloom_max_idx = bloom_slice[CHLA].idxmax()
     bloom_max_value = bloom_slice[CHLA].max()
@@ -33,7 +58,7 @@ def find_bloom_phenological_indices(bloom_slice, var_names):
     # mins = scipy.signal.argrelextrema(bloom_slice["CHLA_ADJUSTED_BGCArgoPlus"].values, np.less, order=2)
     mini_slice = bloom_slice.loc[bloom_min_idx:]
     mini_slice_filtered = mini_slice[mini_slice[CHLA] < 3*np.median(bloom_slice[CHLA])]
-    chla_cumsum = np.cumsum(mini_slice_filtered[CHLA])[-1]
+    chla_cumsum = np.cumsum(mini_slice_filtered[CHLA]).values[-1]
     try:
         bloom_initiation_CS = mini_slice.where(mini_slice[CHLA] > (chla_cumsum * 0.1)).dropna(how="all").iloc[0]
     except IndexError:
@@ -78,4 +103,4 @@ def find_bloom_phenological_indices(bloom_slice, var_names):
         "BLOOM_TERMINATION_RC_DATE": bloom_termination_RC[JULD] if bloom_termination_RC is not None else None,
     }
     
-    return phenology_dict
+    return pd.DataFrame([phenology_dict]).reset_index(drop=True)
