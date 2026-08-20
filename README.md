@@ -22,13 +22,25 @@ Provide a brief introduction describing the proposed work. Be sure to also decri
 
 ### The problem
 
-Provide a few sentences describing the problem are you going to explore. If this is a technical exploration of software or data science methods, explain why this work is important in a broader context and specific applications of this work.
+Marine heatwaves (MHW) are discrete periods of anomalously warm ocean temperatures. They are becoming more frequent, intense, and long-lasting as the ocean warms, yet their effects on phytoplankton, the base of the marine food web, remain poorly constrained below the sea surface. Most MHW studies rely on satellite-derived sea surface temperature and surface chlorophyll, which can't resolve how heatwaves reshape phytoplankton bloom timing, physiology, and vertical structure through the water column, or whether they enhance or suppress the biological carbon pump. As MHWs become more common under continued warming, understanding their cumulative effect on ocean productivity and carbon export is central to projecting how the ocean's role as a carbon sink, and its capacity to support fisheries and marine ecosystems, will change.
 
 ## Data and Methods
 
+### Overview
+Identify marine heatwave (MHW) events with strong float coverage (chl, bbp, oxygen) to investigate phenological and physiological changes in phytoplankton through the water column, and determine whether MHWs affect productivity and carbon export.
+
+
 ### Data
 
-Briefly describe and provide citations for the data that will be used (size, format, how to access).
+*Briefly describe and provide citations for the data that will be used (size, format, how to access).*
+Marine heatwave conditions: Hobday et al. (2016) (Python package available: https://github.com/ecjoliver/marineHeatWaves)
+* OISST (0.25°, daily, no subsurface)
+* GOBAI-O2 (1°, with subsurface, monthly time resolution, T,S,O2)
+* ORAS4 (1°, with subsurface, monthly) 
+* SOCA...
+* [Crocolake](https://crocolakedocs.readthedocs.io/en/latest/)
+
+
 
 ### Existing methods
 
@@ -48,11 +60,11 @@ Optional: links to manuscripts or technical documents providing background infor
 
 ### Project goals
 
-List the specific project goals or research questions you want to answer. Think about what outcomes or deliverables you'd like to create (e.g. a series of tutorial notebooks demonstrating how to work with a dataset, results of an anaysis to answer a science question, an example of applying a new analysis method, or a new python package).
+*List the specific project goals or research questions you want to answer. Think about what outcomes or deliverables you'd like to create (e.g. a series of tutorial notebooks demonstrating how to work with a dataset, results of an anaysis to answer a science question, an example of applying a new analysis method, or a new python package).*
 
-* Goal 1
-* Goal 2
-* ...
+* Identify MHWs for analysis
+* Quantify physical and biogeochemical anomalies
+* Define bloom phenologies 
 
 ### Tasks
 
