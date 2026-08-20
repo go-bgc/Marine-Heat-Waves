@@ -137,42 +137,65 @@ def map_study_region(ax=None, ax_lims=[-127, -121, 34, 38], gridlabel=True, figs
 
     return ax
 
-def get_oisst_flag_spatialONLY(all_float_data, 
-                               oisst_path='s3://uw-escience-scratch-prod/oisst/mhw_mask_north_atlantic_final.zarr', 
-                               lon_name='lon',
-                               lat_name='lat',
-                               flag_name='mhw_mask'):
+def get_oisst_flag_spatialONLY(
+        all_float_data,
+        start_date,
+        end_date,
+        oisst_path='s3://uw-escience-scratch-prod/oisst/mhw_mask_north_atlantic_final.zarr',
+        time_name='time',
+        lon_name='lon',
+        lat_name='lat',
+        flag_name='mhw_mask'):
 
     """
-    Match BGC-Argo float profiles to a spatial OISST mask
-    using nearest-neighbor matching with a KDTree.
+    Assign a spatial MHW flag to BGC-Argo profiles for a specified
+    OISST time range.
+
+    An OISST grid cell is flagged True if mhw_mask == 1 at least
+    once between start_date and end_date.
+
+    Each float profile is matched to its nearest OISST grid cell.
+    If that grid cell is True in the spatial mask, the profile
+    receives mhw_mask = 1. Otherwise it receives mhw_mask = 0.
 
     Parameters
     ----------
     all_float_data : pandas.DataFrame
         Must contain:
-        - PLATFORM_NUMBER
-        - CYCLE_NUMBER
-        - LONGITUDE
-        - LATITUDE
+            PLATFORM_NUMBER
+            CYCLE_NUMBER
+            LONGITUDE
+            LATITUDE
+
+    start_date : str or datetime-like
+        Beginning of OISST time range.
+        Example: '2018-01-01'
+
+    end_date : str or datetime-like
+        End of OISST time range.
+        Example: '2020-12-31'
 
     oisst_path : str
-        Path to spatial OISST mask.
+        Path to OISST dataset (.zarr or .nc).
+
+    time_name : str
+        Name of OISST time dimension.
 
     lon_name : str
-        Longitude coordinate name in OISST dataset.
+        Name of OISST longitude coordinate.
 
     lat_name : str
-        Latitude coordinate name in OISST dataset.
+        Name of OISST latitude coordinate.
 
     flag_name : str
-        Name of spatial mask variable.
+        Name of OISST MHW mask variable.
 
     Returns
     -------
     pandas.DataFrame
-        Original dataframe with spatial mask flag added.
+        Original dataframe with spatial MHW flag added.
     """
+
 
     # ---------------------------------------------------
     # 1. Get one location for each float profile
@@ -180,99 +203,270 @@ def get_oisst_flag_spatialONLY(all_float_data,
 
     float_data = (
         all_float_data[
-            ['PLATFORM_NUMBER', 'CYCLE_NUMBER',
-             'LONGITUDE', 'LATITUDE']
+            [
+                'PLATFORM_NUMBER',
+                'CYCLE_NUMBER',
+                'LONGITUDE',
+                'LATITUDE'
+            ]
         ]
-        .groupby(['PLATFORM_NUMBER', 'CYCLE_NUMBER'])
+        .groupby(
+            ['PLATFORM_NUMBER', 'CYCLE_NUMBER']
+        )
         .mean()
     )
 
-    float_wmo_cycle = float_data.index.values
 
     # ---------------------------------------------------
-    # 2. Load OISST spatial mask
+    # 2. Convert dates
+    # ---------------------------------------------------
+
+    start_date = pd.Timestamp(start_date)
+    end_date = pd.Timestamp(end_date)
+
+    if start_date > end_date:
+        raise ValueError(
+            'start_date must be before end_date'
+        )
+
+    print(
+        'Requested MHW time range:',
+        start_date,
+        'to',
+        end_date
+    )
+
+
+    # ---------------------------------------------------
+    # 3. Open OISST dataset
     # ---------------------------------------------------
 
     print('Opening:', oisst_path)
 
     if oisst_path.endswith('.zarr'):
+
         mhw_data = xr.open_zarr(oisst_path)
 
     elif oisst_path.endswith('.nc'):
+
         mhw_data = xr.open_dataset(oisst_path)
 
     else:
-        raise ValueError('OISST file must be .zarr or .nc')
+
+        raise ValueError(
+            'OISST file must be either .zarr or .nc'
+        )
+
 
     # ---------------------------------------------------
-    # 3. Build KDTree from OISST grid
+    # 4. Restrict OISST to requested time period
     # ---------------------------------------------------
 
-    XX, YY = np.meshgrid(
-        mhw_data[lon_name].values,
-        mhw_data[lat_name].values
+    print('Subsetting OISST time...')
+
+    mask_subset = mhw_data[flag_name].sel(
+        {
+            time_name: slice(
+                start_date,
+                end_date
+            )
+        }
     )
 
-    tree = KDTree(
-        np.c_[XX.ravel(), YY.ravel()]
+    if mask_subset.sizes[time_name] == 0:
+        mhw_data.close()
+
+        raise ValueError(
+            'No OISST data found between '
+            f'{start_date} and {end_date}'
+        )
+
+    print(
+        'Actual OISST subset:',
+        mask_subset[time_name].min().values,
+        'to',
+        mask_subset[time_name].max().values
     )
 
-    # Default value for profiles outside / unavailable
+    print(
+        'Number of OISST time steps:',
+        mask_subset.sizes[time_name]
+    )
+
+
+    # ---------------------------------------------------
+    # 5. Collapse ONLY selected dates into spatial mask
+    # ---------------------------------------------------
+
+    spatial_mask = (
+        (mask_subset == 1)
+        .any(dim=time_name)
+        .compute()
+    )
+
+
+    # ---------------------------------------------------
+    # 6. Diagnostics
+    # ---------------------------------------------------
+
+    n_total = spatial_mask.size
+    n_mhw = spatial_mask.sum().item()
+
+    print('Total grid cells:', n_total)
+    print('MHW grid cells:', n_mhw)
+
+    print(
+        'Percent selected:',
+        n_mhw / n_total * 100
+    )
+
+
+    # ---------------------------------------------------
+    # 7. Get coordinates that are actually True
+    # ---------------------------------------------------
+
+    lat_idx, lon_idx = np.where(
+        spatial_mask.values
+    )
+
+    oisst_lats = mhw_data[lat_name].values
+    oisst_lons = mhw_data[lon_name].values
+
+    mhw_lats = oisst_lats[lat_idx]
+    mhw_lons = oisst_lons[lon_idx]
+
+    print(
+        'Number of selected MHW coordinates:',
+        len(mhw_lats)
+    )
+
+
+    # ---------------------------------------------------
+    # 8. Prepare float coordinates
+    # ---------------------------------------------------
+
+    float_lons = (
+        float_data['LONGITUDE']
+        .values
+        .copy()
+    )
+
+    float_lats = (
+        float_data['LATITUDE']
+        .values
+        .copy()
+    )
+
+
+    # Make longitude convention match OISST
+    if np.nanmax(oisst_lons) > 180:
+
+        # OISST uses 0--360
+        float_lons = float_lons % 360
+
+    else:
+
+        # OISST uses -180--180
+        float_lons = (
+            (float_lons + 180) % 360
+        ) - 180
+
+
+    # ---------------------------------------------------
+    # 9. Initialize output
+    # ---------------------------------------------------
+
     all_mhw_flags = np.full(
-        all_float_data.shape[0],
+        len(all_float_data),
         -999.0
     )
 
+
     # ---------------------------------------------------
-    # 4. Match each float profile spatially
+    # 10. Match each float profile to nearest OISST cell
     # ---------------------------------------------------
 
-    lons = float_data['LONGITUDE'].values % 360
-    lats = float_data['LATITUDE'].values
-
-    for ni in range(float_data.shape[0]):
+    for ni, ((wmo, cycle), row) in enumerate(
+        float_data.iterrows()
+    ):
 
         if ni % 100 == 0:
-            print(ni, 'out of', float_data.shape[0])
 
-        # Find nearest OISST grid point
-        distance, ii = tree.query(
-            [lons[ni], lats[ni]]
-        )
+            print(
+                ni,
+                'out of',
+                len(float_data)
+            )
 
-        ri, ci = np.unravel_index(
-            ii,
-            XX.shape
-        )
 
-        # Get WMO and cycle
-        wmo, cycle = float_wmo_cycle[ni]
+        lon = float_lons[ni]
+        lat = float_lats[ni]
 
-        # Find all rows belonging to this profile
-        all_inds = all_float_data.index[
-            (all_float_data['PLATFORM_NUMBER'] == wmo) &
-            (all_float_data['CYCLE_NUMBER'] == cycle)
-        ].values
 
-        # Get spatial mask value
-        output_value = mhw_data[flag_name].isel(
-            **{
-                lat_name: ri,
-                lon_name: ci
-            }
-        ).values
+        # Skip missing positions
+        if np.isnan(lon) or np.isnan(lat):
+            continue
 
-        # Assign back to every measurement from this profile
-        all_mhw_flags[all_inds] = output_value
+
+        # ------------------------------------------------
+        # Find nearest OISST grid cell and get its flag
+        # ------------------------------------------------
+
+        output_value = spatial_mask.sel(
+            {
+                lon_name: lon,
+                lat_name: lat
+            },
+            method='nearest'
+        ).item()
+
+        output_value = int(output_value)
+
+
+        # ------------------------------------------------
+        # Find all dataframe rows belonging to profile
+        # ------------------------------------------------
+
+        all_inds = np.where(
+            (
+                all_float_data[
+                    'PLATFORM_NUMBER'
+                ].values == wmo
+            )
+            &
+            (
+                all_float_data[
+                    'CYCLE_NUMBER'
+                ].values == cycle
+            )
+        )[0]
+
+
+        # ------------------------------------------------
+        # Assign spatial MHW flag
+        # ------------------------------------------------
+
+        all_mhw_flags[
+            all_inds
+        ] = output_value
+
 
     # ---------------------------------------------------
-    # 5. Add flag to original dataframe
+    # 11. Add flag to dataframe
     # ---------------------------------------------------
 
     all_float_data = all_float_data.assign(
-        **{flag_name: all_mhw_flags}
+        **{
+            flag_name: all_mhw_flags
+        }
     )
 
+
+    # ---------------------------------------------------
+    # 12. Close dataset
+    # ---------------------------------------------------
+
     mhw_data.close()
+
 
     return all_float_data
