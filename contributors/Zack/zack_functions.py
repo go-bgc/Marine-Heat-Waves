@@ -17,7 +17,7 @@ def find_bloom_phenological_indices(bloom_slice, var_names, what_type):
         desired_var = CHLA
     elif what_type == 2:
         desired_var = BBP700
-    if len(bloom_slice.desired_var) == 0:
+    if len(bloom_slice[desired_var]) == 0:
         phenology_dict = {
             # "REGION": region,
             f"YEAR_{desired_var}": np.nan,
@@ -80,7 +80,7 @@ def find_bloom_phenological_indices(bloom_slice, var_names, what_type):
     # mins = scipy.signal.argrelextrema(bloom_slice["CHLA_ADJUSTED_BGCArgoPlus"].values, np.less, order=2)
     mini_slice = bloom_slice.loc[bloom_min_idx:]
     mini_slice_filtered = mini_slice[mini_slice[desired_var] < 3*np.median(bloom_slice[desired_var])]
-    chla_cumsum = np.cumsum(mini_slice_filtered[desired_var]).values[-1]
+    chla_cumsum = np.cumsum(mini_slice_filtered[desired_var])[-1]
     try:
         bloom_initiation_CS = mini_slice.where(mini_slice[desired_var] > (chla_cumsum * 0.1)).dropna(how="all").iloc[0]
     except IndexError:
@@ -108,7 +108,6 @@ def find_bloom_phenological_indices(bloom_slice, var_names, what_type):
         bloom_termination_RC = post_slice.where(post_slice["RATE_OF_CHANGE"] > -rate_of_change_threshold)[1:].dropna(how="all").iloc[0]
     except IndexError:
         bloom_termination_RC = None
-        df1.loc['a'] > 0
     try:
         start_idx = bloom_slice.index[bloom_slice[JULD] == bloom_initiation_RC[JULD]][0]
         end_idx = bloom_slice.index[bloom_slice[JULD] == bloom_termination_RC[JULD]][0]
